@@ -20,53 +20,117 @@ var authServer = {
     tokenEndpoint: 'http://localhost:9001/token'
 };
 
-// client information
-
-
 /*
  * Add the client information in here
  */
 var client = {
-    "client_id": "",
-    "client_secret": "",
+    "client_id": "oauth-client-1",
+    "client_secret": "oauth-client-secret-1",
     "redirect_uris": ["http://localhost:9000/callback"]
 };
 
 var protectedResource = 'http://localhost:9002/resource';
 
+// 避免攻击者暴力搜索有效的授权码，浪费客户端的授权服务器的资源、会话固化攻击
 var state = null;
 
 var access_token = null;
 var scope = null;
 
+// 客户端主页，需要包含一个能让用户跳转到授权服务器登录的按钮
 app.get('/', function (req, res) {
     res.render('index', {access_token: access_token, scope: scope});
 });
 
+// 能让用户跳转至授权服务器获取code的逻辑
 app.get('/authorize', function (req, res) {
+    access_token = null;
 
-    /*
-     * Send the user to the authorization server
-     */
+    state = randomstring.generate();
 
+    var authorizeUrl = buildUrl(authServer.authorizationEndpoint, {
+        response_type: 'code',
+        client_id: client.client_id,
+        redirect_uri: client.redirect_uris[0],
+        state: state
+    });
+
+    res.redirect(authorizeUrl)
 });
 
+// 解析来自授权服务器的响应并获得一个令牌
 app.get('/callback', function (req, res) {
+    if (req.query.error) {
+        res.render('error', {error: req.query.error});
+        return
+    }
 
-    /*
-     * Parse the response from the authorization server and get a token
-     */
+    if (req.query.state != state) {
+        console.log('State DOES NOT MATCH: expected %s got %s', state, req.query.state);
+        res.render('error', {error: 'State value did not match'});
+        return;
+    }
 
+    var code = req.query.code;
+
+    var form_data = qs.stringify({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: client.redirect_uris[0]
+    });
+
+    var headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',    // 参数编码为查询字符串，和JSON编码不同，不会保留值的数据类型
+        'Authorization': 'Basic ' + encodeClientCredentials(client.client_id, client.client_secret)
+    };
+
+    var tokRes = request('POST', authServer.tokenEndpoint, {
+        body: form_data,
+        headers: headers
+    });
+
+    console.log('Requesting access token for code %s', code);
+
+    if (tokRes.statusCode >= 200 && tokRes.statusCode < 300) {
+        var body = JSON.parse(tokRes.getBody());
+
+        access_token = body.access_token;
+        console.log('Got access token: %s', access_token);
+
+        res.render('index', {access_token: access_token, scope: scope});
+    } else {
+        res.render('error', {error: 'Unable to fetch access token, server response: ' + tokRes.statusCode})
+    }
 });
 
+// 使用访问令牌来获取资源服务器受保护的资源
 app.get('/fetch_resource', function (req, res) {
 
-    /*
-     * Use the access token to call the resource server
-     */
+    if (!access_token) {
+        res.render('error', {error: 'Missing Access Token'});
+        return;
+    }
 
+    console.log('Making request with access token %s', access_token);
+
+    var headers = {
+        'Authorization': 'Bearer ' + access_token
+    };
+
+    var resource = request('POST', protectedResource, {headers: headers});
+
+    if (resource.statusCode >= 200 && resource.statusCode < 300) {
+        var body = JSON.parse(resource.getBody());
+        res.render('data', {resource: body});
+        return;
+    } else {
+        access_token = null;
+        res.render('error', {error: resource.statusCode});
+        return;
+    }
 });
 
+// 承担查询参数格式化和参数值URL编码工作
 var buildUrl = function (base, options, hash) {
     var newUrl = url.parse(base, true);
     delete newUrl.search;
@@ -74,7 +138,7 @@ var buildUrl = function (base, options, hash) {
         newUrl.query = {};
     }
     __.each(options, function (value, key, list) {
-        newUrl.query[key] = value;
+        newUrl.query[key] = value;      // 给URL添加查询参数
     });
     if (hash) {
         newUrl.hash = hash;

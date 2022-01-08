@@ -18,7 +18,7 @@ app.set('view engine', 'html');
 app.set('views', 'files/authorizationServer');
 app.set('json spaces', 4);
 
-// authorization server information
+// 客户端需要知道自己与那个授权服务器交互，以及如何交互
 var authServer = {
     authorizationEndpoint: 'http://localhost:9001/authorize',
     tokenEndpoint: 'http://localhost:9001/token'
@@ -27,10 +27,10 @@ var authServer = {
 // 客户端注册信息
 var clients = [
     {
-        "client_id": "oauth-client-1",
-        "client_secret": "oauth-client-secret-1",
-        "redirect_uris": ["http://localhost:9000/callback"],
-        "scope": "foo bar"
+        "client_id": "oauth-client-1",      // 客户端标识符，由授权服务器在开发者模式下分配，不能重复
+        "client_secret": "oauth-client-secret-1",       // 用于与授权服务器交互时，对客户端自身身份的认证
+        "redirect_uris": ["http://localhost:9000/callback"],    // 定义授权码返回给客户端的uri
+        "scope": "foo bar"      // 客户端能申请的权限范围
     }
 ];
 
